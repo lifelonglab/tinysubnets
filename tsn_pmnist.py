@@ -1,4 +1,3 @@
-# Authorized by Haeyong Kang.
 
 import torch
 import torch.optim as optim
@@ -159,9 +158,6 @@ def train(args, model, device, x, y, optimizer,criterion, task_id_nominal, conso
     np.random.shuffle(r)
     r=torch.LongTensor(r).to(device)
 
-    #import pdb
-    #pdb.set_trace()
-
     # Loop batches
     for i in range(0,len(r),args.batch_size_train):
         if ((i + args.batch_size_train) <= len(r)):
@@ -177,13 +173,8 @@ def train(args, model, device, x, y, optimizer,criterion, task_id_nominal, conso
         if i < replay_size*args.batch_size_train and replay_memory is not None:
             replay_memory.append(memory.detach().cpu().numpy())
 
-        #import pdb
-        #pdb.set_trace()
-
         loss = criterion(output, target)
         loss.backward()
-
-        #pdb.set_trace()
 
         # Continual Subnet no backprop
         curr_head_keys = ["last.{}.weight".format(task_id_nominal), "last.{}.bias".format(task_id_nominal)]
@@ -214,33 +205,30 @@ def train(args, model, device, x, y, optimizer,criterion, task_id_nominal, conso
         
         per_task = {}
 
-        #if i == -1:
-        #    #if i % 30 == 0:
-        #    #import pdb
-        #    #pdb.set_trace()
-
-        #    per_task[task_id_nominal] = model.module.get_masks(task_id_nominal)
-        #    sd = model.state_dict()
-           
-        #    for k_, v in sd.items():
-        #        if 'weight' in k_ and k_[7:] in per_task[task_id_nominal].keys():
-        #            #if isinstance(module, nn.Conv2d) or isinstance(module, nn.Linear):
-
-        #            new_weight = v*(per_task[task_id_nominal][k_[7:]] == 1).float()
-        #            other_weights = v*(per_task[task_id_nominal][k_[7:]] != 1).float()
-
-        #            #import pdb
-        #            #pdb.set_trace()
-        #            q_weight, values, labels = vquant(new_weight, n_clusters=16)                 
-        #            q_weight = torch.from_numpy(q_weight).cuda()             
-                
-        #            q_weight[per_task[task_id_nominal][k_[7:]] != 1] = 0
-
-        #            new_weight = q_weight*(per_task[task_id_nominal][k_[7:]] == 1).float()
-        #            sd[k_] = new_weight + other_weights
-        #    
-        #    model.load_state_dict(sd)  
         optimizer.step()
+
+        if i % 30 == 0:
+        
+            per_task[task_id_nominal] = model.get_masks(task_id_nominal)
+            sd = model.state_dict()
+           
+            for k_, v in sd.items():
+                if 'weight' in k_ and k_[7:] in per_task[task_id_nominal].keys():
+                    #if isinstance(module, nn.Conv2d) or isinstance(module, nn.Linear):
+
+                    new_weight = v*(per_task[task_id_nominal][k_[7:]] == 1).float()
+                    other_weights = v*(per_task[task_id_nominal][k_[7:]] != 1).float()
+
+                    q_weight, values, labels = vquant(new_weight, n_clusters=16)                 
+                    q_weight = torch.from_numpy(q_weight).cuda()             
+                
+                    q_weight[per_task[task_id_nominal][k_[7:]] != 1] = 0
+
+                    new_weight = q_weight*(per_task[task_id_nominal][k_[7:]] == 1).float()
+                    sd[k_] = new_weight + other_weights
+            
+            model.load_state_dict(sd)  
+        
 
 def test(args, model, device, x, y, criterion, task_id_nominal, curr_task_masks=None, mode="test"):
     model.eval()
@@ -329,6 +317,10 @@ def main(args):
     ptm.append(per_task_masks)
     cm.append(consolidated_masks)
 
+    own_mask = {}
+    common_mask = {}
+    sparsities = {}
+
     for k, ncla in taskcla:
 
         #kl between tasks
@@ -393,9 +385,6 @@ def main(args):
         
         replay_memory[task_id] = [] 
 
-        #import pdb
-        #pdb.set_trace() 
-
         for epoch in range(1, args.n_epochs+1):
             # Train
             clock0 = time.time()
@@ -454,31 +443,6 @@ def main(args):
                     patience=args.lr_patience
                     adjust_learning_rate(optimizer, epoch, args)
             print()
-            #per_task_masks[task_id] = model.get_masks(task_id) #model.module.get_masks(task_id)
-            
-            #sd = model.state_dict()
-           
-            #for k_, v in sd.items():
-            #    if 'weight' in k_ and k_[7:] in per_task_masks[task_id].keys():
-            #        #if isinstance(module, nn.Conv2d) or isinstance(module, nn.Linear):
-
-            #        new_weight = v*(per_task_masks[task_id][k_[7:]] == 1).float()
-            #        other_weights = v*(per_task_masks[task_id][k_[7:]] != 1).float()
-
-            #        q_weight, values, labels = vquant(new_weight, n_clusters=16)                 
-            #        q_weight = torch.from_numpy(q_weight).cuda()             
-                
-            #        q_weight[per_task_masks[task_id][k_[7:]] != 1] = 0
-
-            #        new_weight = q_weight*(per_task_masks[task_id][k_[7:]] == 1).float()
-            #        sd[k_] = new_weight + other_weights
-            
-            #model.load_state_dict(sd)
-
-        #in a loop
-        #check mask if available
-        #try to increase by score
-        #test it 
 
         # Restore best model
         if task_id < 10:
@@ -494,13 +458,32 @@ def main(args):
             #ptm[0][task_id] = models[0].module.get_masks(task_id)
             #per_task_masks[task_id] = model.module.get_masks(task_id)
         else:
-            #import pdb
-            #pdb.set_trace()
             ptm[1][task_id] = models[1].get_masks(task_id)
             #ptm[1][task_id] = models[1].module.get_masks(task_id)
+
+        own_mask[task_id] = {}
+        common_mask[task_id] = {}
+        sparsities[task_id] = {}
+
+        for key in per_task_masks[task_id].keys():
+            if task_id == 0:       
+                #if per_task_masks[task_id][key] is not None:        
+                own_mask[task_id][key] = per_task_masks[task_id][key]
+                #common_mask[task_id][key] = (ptm[0][task_id][key] & consolidated_masks[key]).int()
+            else:
+                if per_task_masks[task_id][key] is not None:
+                
+                    common_mask[task_id][key] = (ptm[0][task_id][key] & consolidated_masks[key]).int() #.astype(int)
+                    own_mask[task_id][key] = ((ptm[0][task_id][key] == 1) & (consolidated_masks[key] == 0)).int() #.astype(int)
+
+                else:
+                    common_mask[task_id][key] = None
+                    own_mask[task_id][key] = None
+
+        consolidated_masks_before = deepcopy(consolidated_masks)
+
         # Consolidate task masks to keep track of parameters to-update or not
         curr_head_keys = ["last.{}.weight".format(task_id), "last.{}.bias".format(task_id)]
-        #if task_id == 0:
 
         if task_id == 0:
             #consolidated_masks = deepcopy(per_task_masks[task_id])
@@ -538,14 +521,84 @@ def main(args):
                         cm[1][key] = 1-((1-cm[1][key])*(1-ptm[1][task_id][key]))
 
         if k >= 0:
+
+            #post pruning
+            for iteration in range(30):
+          
+                keys = own_mask[task_id].keys()
+                layer_id = np.random.choice(range(len(keys)))
+
+                keys = list(keys)
+                key = keys[layer_id]
+
+                if own_mask[task_id][key] is not None:
+                    own_mask_bp = deepcopy(own_mask[task_id][key])
+
+                    if iteration == 0:
+                        n_consolidated_masks_before = deepcopy(consolidated_masks)
+                    else:
+                        n_consolidated_masks_before = deepcopy(n_consolidated_masks)
+                    
+                sd = model.state_dict()
+
+                if own_mask[task_id][key] is not None and ('module.' + key) in sd.keys() :
+                    idx = (own_mask[task_id][key] > 0).nonzero()
+
+                    #k = 1 + round(0.1 * (scores.numel() - 1))
+                    #kvalue = own_mask[task_id].cpu().kthvalue(k)[0].item()
+
+                    temp = own_mask[task_id][key] * sd['module.' + key]
+                    # mult weight and own_mask
+
+                    idx = torch.where(temp != 0)
+                    values = sd['module.' + key][idx] 
+                    # get > 0
+
+                    k = 1 + round(0.2 * (values.numel() - 1))
+                    kvalue = torch.abs(values).cpu().kthvalue(k)[0].item()
+
+                    temp[torch.abs(temp) < kvalue] = 0
+                    own_mask[task_id][key][temp == 0] = 0
+
+
+                if task_id == 0:
+                    n_consolidated_masks = deepcopy(own_mask[task_id])
+                else:
+                    for key in own_mask[task_id].keys():
+                        # Skip output head from other tasks
+                        # Also don't consolidate output head mask after training on new tasks; continue
+                        if "last" in key:
+                            if key in curr_head_keys:
+                                n_consolidated_masks[key] = deepcopy(own_mask[task_id][key])
+                            continue
+
+                        # Or operation on sparsity
+                        if n_consolidated_masks[key] is not None and own_mask[task_id][key] is not None:
+                            #n_consolidated_masks[key] = 1-((1-n_consolidated_masks[key])*(1-own_mask[task_id][key]))
+                            n_consolidated_masks[key] = 1-((1-consolidated_masks_before[key])*(1-own_mask[task_id][key]))
+
+                tr_loss_, tr_acc_ = test(args, model, device, xtrain, ytrain,  criterion, task_id, curr_task_masks=n_consolidated_masks, mode="valid")
+            
+                tr_loss, tr_acc = test(args, model, device, xtrain, ytrain,  criterion, task_id, curr_task_masks=consolidated_masks, mode="valid")
+                clock2=time.time()
+                print('Epoch {:3d} | Train: loss={:.3f}, acc={:5.1f}% | time={:5.1f}ms | test time={:5.1f}ms'.format(epoch,\
+                                                        tr_loss,tr_acc, 1000*(clock1-clock0), (clock2 - clock1)*1000 ), end='')
+
+                #update sensitivity, go forward or cancel last step
+                if tr_acc_ > tr_acc - 0.2:
+                    if own_mask[task_id][key] is not None:
+                        n_consolidated_masks[key] = deepcopy(n_consolidated_masks[key])
+                        #own_mask[task_id][key] = deepcopy(own_mask[task_id][key])
+                else:  
+                    if own_mask[task_id][key] is not None:
+                        n_consolidated_masks[key] = deepcopy(n_consolidated_masks_before[key])
+                        own_mask[task_id][key] = own_mask_bp
+
             if task_id < 10:
                 #sd = model.state_dict()
                 sd = models[0].state_dict()
             else:
                 sd = models[1].state_dict()
-           
-            #import pdb
-            #pdb.set_trace()
 
             for k_, v in sd.items():
                 if 'weight' in k_ and k_[7:] in consolidated_masks.keys():
@@ -563,7 +616,6 @@ def main(args):
                     sd[k_] = new_weight + other_weights
             
             if task_id < 10:
-                #model.load_state_dict(sd)
                 sd = models[0].load_state_dict(sd)
             else:
                 sd = models[1].load_state_dict(sd)
@@ -578,52 +630,6 @@ def main(args):
                                                         tr_loss,tr_acc, 1000*(clock1-clock0), (clock2 - clock1)*1000 ), end='')
 
 
-        #from dhc.quantization.basic_routines.cadence import linear_cadence
-        #from dhc.quantization.basic_routines.cadence import linear_cadence_hist
-
-        #from dhc.quantization.parameters_quantization import ParametersQuantization
-        #parameter_quantization = ParametersQuantization(quantization_procedure=linear_cadence, word_len=8)
-        #models[0], _, _ = parameter_quantization.get_quantized_model(model=models[0].cpu(), task_id=task_id)
-        #models[0].cuda()
-
-        #if task_id < 10:
-        #    from dhc.quantization.parameters_quantization import ParametersQuantization
-        #    parameter_quantization = ParametersQuantization(quantization_procedure=linear_cadence, word_len=4)
-        #    models[0], _, _ = parameter_quantization.get_quantized_model(model=models[0].cpu(), task_id=task_id)
-        #    models[0].cuda()
-        #else:
-        #    from dhc.quantization.parameters_quantization import ParametersQuantization
-        #    parameter_quantization = ParametersQuantization(quantization_procedure=linear_cadence, word_len=4)
-        #    models[1], _, _ = parameter_quantization.get_quantized_model(model=models[1].cpu(), task_id=task_id)
-        #    models[1].cuda()
-  
-        
-        #from dhc.quantization.activation_quantization import ActivationQuantization
-        #activations_quant = ActivationQuantization(quantization_procedure=linear_cadence_hist, word_len=4)
-        
-        #if task_id < 10:
-        #    models[0] = activations_quant.get_stats_(models[0].cpu()) 
-            models[0].cuda()
-
-        #    #test_loss, test_acc = test(args, models[0], device, xtest, ytest,  criterion, task_id, curr_task_masks=ptm[0][task_id], mode="test")
-        
-        #    test_loss, test_acc = test(args, models[0], device, xtest, ytest, criterion, task_id, curr_task_masks=ptm[0][task_id], mode="test")
-        #    models[0] = activations_quant.get_quantized_model_(models[0].cpu())
-        #    models[0].cuda()
-        #else:
-        #    models[1] = activations_quant.get_stats_(models[1].cpu()) 
-        #    models[1].cuda()
-
-        #    #test_loss, test_acc = test(args, models[0], device, xtest, ytest,  criterion, task_id, curr_task_masks=ptm[1][task_id], mode="test")
-        
-        #    test_loss, test_acc = test(args, models[1], device, xtest, ytest, criterion, task_id, curr_task_masks=ptm[1][task_id], mode="test")
-        #    models[1] = activations_quant.get_quantized_model_(models[1].cpu())
-        #    models[1].cuda()
-
-        #import pdb
-        #pdb.set_trace()
-
-
         if task_id < 10:
             torch.save(models[0], 'task_' + str(task_id) + '.pt')
             torch.save(consolidated_masks, 'consolidated_masks.pt')
@@ -632,9 +638,6 @@ def main(args):
             torch.save(models[1], 'task_' + str(task_id) + '_.pt')
             torch.save(consolidated_masks, 'consolidated_masks_.pt')
             torch.save(per_task_masks, 'task_masks_.pt')
-
-        #import pdb
-        #pdb.set_trace()
 
         # === saver ===
         if save_flag:
@@ -703,11 +706,6 @@ def main(args):
         # save accuracy
         jj = task_id + 1
         for ii in range(task_id+1,10):
-            #if jj < task_id:
-            #    acc_matrix[task_id, jj] = acc_matrix[task_id-1, jj]
-            #else:
-            #import pdb
-            #pdb.set_trace()
 
             xtest = data[ii]['test']['x']
             ytest = data[ii]['test']['y']
@@ -718,9 +716,6 @@ def main(args):
                 _, acc_matrix[task_id,jj] = test(args, models[1], device, xtest, ytest,criterion, jj, curr_task_masks=ptm[1][task_id], mode="test")
             jj +=1
 
-        #import pdb
-        #pdb.set_trace()
-
         print('Accuracies =')
         for i_a in range(task_id+1):
             print('\t',end='')
@@ -728,20 +723,11 @@ def main(args):
                 print('{:5.1f} '.format(acc_matrix[i_a,j_a]),end='')
             print()
 
-        #if task_id < 10:
-        #    models[0] = activations_quant.get_transparent_model(models[0].cpu())
-        #    models[0].cuda()
-        #else:
-        #    models[1] = activations_quant.get_transparent_model(models[1].cpu())
-        #    models[1].cuda()
-
         # update task id
         task_id +=1     
 
     kld(torch.from_numpy(np.asarray(replay_memory[0])), torch.from_numpy(np.asarray(replay_memory[1])))
-
-    import pdb
-    pdb.set_trace()    
+    
 
     save_name = "wsn_pmnist_SEED_{}_LR_{}_SPARSITY_{}".format(args.seed, args.lr, 1 - args.sparsity)
     safe_save("results2/wsn_pmnist/" + save_name + ".acc", acc_matrix)
