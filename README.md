@@ -24,8 +24,8 @@ pip install torchvision
 
 
 ## Usage
-python main_tsn_cifar100.py --dataset cifar100_100
-python main_pmnist.py
+python tsn_cifar100.py --dataset cifar100_100
+python pmnist.py
 
 setting different input parameters:
 
